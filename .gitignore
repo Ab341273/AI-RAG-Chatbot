@@ -9,11 +9,11 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-chroma_db/
 
-*.sqlite
-*.sqlite3
-*.db
+
+
+
+
 
 .cache/
 .cache.sqlite
