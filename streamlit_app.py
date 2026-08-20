@@ -3,10 +3,13 @@ import uuid
 
 import streamlit as st
 
+from config.Database import Base, engine
 from rag_handler.chat import answer_query
 from services.conversation_manager import get_conversation_manager
 from services.database_service import DatabaseService
 from services.logging_service import get_logger
+
+Base.metadata.create_all(bind=engine)
 
 logger = get_logger(__name__)
 
