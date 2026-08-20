@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./.mlvenv/Scripts/python.exe -c \"import json;print\\('settings.json valid:', bool\\(json.load\\(open\\('.vscode/settings.json'\\)\\)\\)\\)\")"
+    ]
+  }
+}

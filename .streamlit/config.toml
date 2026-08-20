@@ -1,0 +1,5 @@
+[client]
+# Disable deep module introspection during hot-reload to avoid triggering
+# lazy imports of transformers' optional vision models (e.g., ZoeDepth)
+# which require torchvision. This app is text-based only.
+fileWatcherType = "poll"
