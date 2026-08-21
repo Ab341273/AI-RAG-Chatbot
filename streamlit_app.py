@@ -54,22 +54,28 @@ st.markdown(
     }
 
     .block-container {
-        padding-top: 1.5rem;
+        padding-top: 0 !important;
         max-width: 900px;
     }
 
     /* Header */
     .app-header {
-        padding-bottom: 1rem;
-        border-bottom: 1px solid #2a2a2f;
-        margin-bottom: 1.5rem;
+        display: block !important;
+        padding: 1.5rem 0 1rem 0 !important;
+        border-bottom: 1px solid #2a2a2f !important;
+        margin-bottom: 2rem !important;
+        position: sticky !important;
+        top: 0 !important;
+        background-color: #0f0f12 !important;
+        z-index: 999 !important;
+        width: 100% !important;
     }
     .app-title {
-        font-size: 1.8rem;
-        font-weight: 700;
+        font-size: 3rem;
+        font-weight: 900;
         color: #ffffff;
-        margin: 0 0 0.4rem 0;
-        letter-spacing: -0.4px;
+        margin: 0 0 0.5rem 0;
+        letter-spacing: -0.5px;
     }
     .app-subtitle {
         font-size: 0.8rem;
@@ -141,17 +147,23 @@ st.markdown(
     div[data-testid="stChatInput"] {
         background-color: transparent !important;
         border: none !important;
-        border-bottom: 1px solid #2a2a2f !important;
+        border-bottom: 1px solid #3a3a3f !important;
         border-radius: 0 !important;
         transition: all 0.2s ease;
-        padding: 0 !important;
+        padding: 12px 0 !important;
+        margin: 20px 0 !important;
     }
     div[data-testid="stChatInput"]:focus-within {
         border-bottom-color: #5a67ff !important;
     }
+    div[data-testid="stChatInput"] > div {
+        background-color: transparent !important;
+        border: none !important;
+    }
     div[data-testid="stChatInput"] textarea {
         color: #e0e0e0 !important;
-        background-color: #1a1a1e !important;
+        background-color: transparent !important;
+        border: none !important;
     }
     div[data-testid="stChatInput"] textarea::placeholder {
         color: #606066 !important;
@@ -222,7 +234,7 @@ if "messages" not in st.session_state:
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown(f"### {APP_NAME}")
+    st.markdown(f"# {APP_NAME}")
     st.caption("Smart AI assistant for your documents")
     st.divider()
 
