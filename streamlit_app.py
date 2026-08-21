@@ -8,13 +8,14 @@ from rag_handler.chat import answer_query
 from services.conversation_manager import get_conversation_manager
 from services.database_service import DatabaseService
 from services.logging_service import get_logger
+from services.ingestion_service import handle_pdf_upload, run_full_ingestion, get_ingestion_status
 
 Base.metadata.create_all(bind=engine)
 
 logger = get_logger(__name__)
 
-APP_NAME = "DocuMind"
-APP_TAGLINE = "Ask anything about your documents"
+APP_NAME = "Askify"
+APP_TAGLINE = "Smart answers powered by your documents"
 
 st.set_page_config(
     page_title=APP_NAME,
@@ -29,120 +30,88 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    * {
+        font-family: 'Inter', sans-serif;
+    }
 
     html, body, [class*="css"] {
-        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-family: 'Inter', sans-serif;
+        background-color: #0f0f12;
+        color: #e0e0e0;
     }
 
     footer { visibility: hidden; }
 
     .stApp {
-        background: radial-gradient(circle at 15% 20%, #2a1b4d 0%, transparent 45%),
-                    radial-gradient(circle at 85% 15%, #1b3a4d 0%, transparent 45%),
-                    radial-gradient(circle at 50% 90%, #3d1b4d 0%, transparent 50%),
-                    linear-gradient(160deg, #0b0e1a 0%, #0f1424 50%, #0b0e1a 100%);
-        background-attachment: fixed;
-    }
-
-    .stApp::before, .stApp::after {
-        content: "";
-        position: fixed;
-        border-radius: 50%;
-        filter: blur(90px);
-        z-index: 0;
-        pointer-events: none;
-        opacity: 0.55;
-    }
-    .stApp::before {
-        width: 420px; height: 420px;
-        background: linear-gradient(135deg, #7f5af0, #2cb67d);
-        top: -140px; left: -140px;
-        animation: floatBlob 14s ease-in-out infinite;
-    }
-    .stApp::after {
-        width: 380px; height: 380px;
-        background: linear-gradient(135deg, #ff5da2, #5a67ff);
-        bottom: -120px; right: -120px;
-        animation: floatBlob 16s ease-in-out infinite reverse;
-    }
-    @keyframes floatBlob {
-        0%, 100% { transform: translate(0, 0) scale(1); }
-        50% { transform: translate(40px, 30px) scale(1.08); }
+        background-color: #0f0f12;
     }
 
     section[data-testid="stSidebar"] {
-        background: rgba(255, 255, 255, 0.04);
-        backdrop-filter: blur(18px);
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        background-color: #1a1a1e !important;
+        border-right: 1px solid #2a2a2f;
     }
 
-    .block-container { padding-top: 2rem; max-width: 760px; }
+    .block-container {
+        padding-top: 1.5rem;
+        max-width: 900px;
+    }
 
     /* Header */
     .app-header {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        padding: 18px 22px;
-        margin-bottom: 22px;
-        border-radius: 20px;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(20px);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-        animation: fadeSlideIn 0.5s ease-out;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #2a2a2f;
+        margin-bottom: 1.5rem;
     }
-    .app-logo {
-        width: 46px; height: 46px;
-        border-radius: 14px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 22px;
-        background: linear-gradient(135deg, #7f5af0, #2cb67d);
-        box-shadow: 0 4px 18px rgba(127, 90, 240, 0.45);
+    .app-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #ffffff;
+        margin: 0 0 0.4rem 0;
+        letter-spacing: -0.4px;
     }
-    .app-title { font-size: 1.35rem; font-weight: 800; color: #f5f3ff; margin: 0; letter-spacing: -0.3px; }
-    .app-subtitle { font-size: 0.85rem; color: #a3a3c2; margin: 0; }
+    .app-subtitle {
+        font-size: 0.8rem;
+        color: #606066;
+        margin: 0;
+    }
 
     /* Chat bubbles */
     .bubble-row {
         display: flex;
-        gap: 10px;
-        margin-bottom: 16px;
-        animation: fadeSlideIn 0.35s ease-out;
+        gap: 12px;
+        margin-bottom: 12px;
     }
     .bubble-row.user { flex-direction: row-reverse; }
 
     .avatar {
-        width: 34px; height: 34px;
-        min-width: 34px;
+        width: 32px; height: 32px;
+        min-width: 32px;
         border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
         font-size: 16px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        background-color: #2a2a2f;
     }
-    .avatar.user { background: linear-gradient(135deg, #5a67ff, #7f5af0); }
-    .avatar.bot { background: linear-gradient(135deg, #2cb67d, #16bdca); }
+    .avatar.user { background-color: #5a67ff; }
+    .avatar.bot { background-color: #2a2a2f; color: #909099; }
 
     .bubble {
-        max-width: 78%;
-        padding: 13px 17px;
-        border-radius: 18px;
+        max-width: 85%;
+        padding: 12px 16px;
+        border-radius: 12px;
         font-size: 0.95rem;
-        line-height: 1.55;
-        color: #eceaf6;
-        backdrop-filter: blur(16px);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        line-height: 1.5;
+        color: #e0e0e0;
     }
     .bubble.user {
-        background: linear-gradient(135deg, rgba(127,90,240,0.35), rgba(90,103,255,0.25));
-        border: 1px solid rgba(160, 140, 255, 0.35);
-        border-top-right-radius: 6px;
+        background-color: #5a67ff;
+        color: #ffffff;
     }
     .bubble.bot {
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-top-left-radius: 6px;
+        background-color: #1a1a1e;
+        border: 1px solid #2a2a2f;
+        color: #e0e0e0;
     }
     .bubble p { margin: 0 0 8px 0; }
     .bubble p:last-child { margin-bottom: 0; }
@@ -170,60 +139,71 @@ st.markdown(
 
     /* Chat input */
     div[data-testid="stChatInput"] {
-        background: rgba(255, 255, 255, 0.06);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 18px;
-        box-shadow: 0 8px 26px rgba(0,0,0,0.3);
-        transition: box-shadow 0.25s ease, border-color 0.25s ease;
+        background-color: transparent !important;
+        border: none !important;
+        border-bottom: 1px solid #2a2a2f !important;
+        border-radius: 0 !important;
+        transition: all 0.2s ease;
+        padding: 0 !important;
     }
-    div[data-testid="stChatInput"]:hover,
     div[data-testid="stChatInput"]:focus-within {
-        border-color: rgba(127, 90, 240, 0.55);
-        box-shadow: 0 8px 30px rgba(127, 90, 240, 0.28);
+        border-bottom-color: #5a67ff !important;
     }
-    div[data-testid="stChatInput"] textarea { color: #eceaf6 !important; }
+    div[data-testid="stChatInput"] textarea {
+        color: #e0e0e0 !important;
+        background-color: #1a1a1e !important;
+    }
+    div[data-testid="stChatInput"] textarea::placeholder {
+        color: #606066 !important;
+    }
 
     button[data-testid="stChatInputSubmitButton"] {
-        background: linear-gradient(135deg, #7f5af0, #2cb67d) !important;
-        border-radius: 12px !important;
-        transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+        background-color: #5a67ff !important;
+        border: none !important;
+        border-radius: 8px !important;
+        color: #ffffff !important;
+        transition: all 0.2s ease !important;
     }
     button[data-testid="stChatInputSubmitButton"]:hover {
-        transform: scale(1.08);
-        box-shadow: 0 0 16px rgba(127, 90, 240, 0.6);
-    }
-    button[data-testid="stChatInputSubmitButton"]:active {
-        transform: scale(0.92);
+        background-color: #6b78ff !important;
+        transform: scale(1.05);
     }
 
     /* Sidebar buttons */
     section[data-testid="stSidebar"] button {
-        background: rgba(255,255,255,0.06) !important;
-        border: 1px solid rgba(255,255,255,0.14) !important;
-        color: #eceaf6 !important;
-        border-radius: 12px !important;
+        background-color: transparent !important;
+        border: none !important;
+        color: #e0e0e0 !important;
+        border-radius: 8px !important;
         transition: all 0.2s ease !important;
     }
     section[data-testid="stSidebar"] button:hover {
-        border-color: rgba(127,90,240,0.6) !important;
-        box-shadow: 0 0 14px rgba(127,90,240,0.35);
+        background-color: rgba(90, 103, 255, 0.1) !important;
+        color: #5a67ff !important;
+    }
+
+    /* Remove expander borders */
+    section[data-testid="stSidebar"] [data-testid="stExpander"] {
+        border: none !important;
     }
 
     ::-webkit-scrollbar { width: 8px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb {
-        background: rgba(127, 90, 240, 0.4);
+        background: #2a2a2f;
         border-radius: 10px;
     }
 
     .empty-state {
         text-align: center;
-        padding: 60px 20px;
-        color: #8a86ad;
-        animation: fadeSlideIn 0.6s ease-out;
+        padding: 80px 20px;
+        color: #606066;
     }
-    .empty-state .icon { font-size: 2.6rem; margin-bottom: 10px; }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 16px; }
+    .empty-state div {
+        font-size: 1rem;
+        color: #909099;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -242,8 +222,52 @@ if "messages" not in st.session_state:
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown(f"### ✨ {APP_NAME}")
-    st.caption("Retrieval-augmented assistant over your PDFs")
+    st.markdown(f"### {APP_NAME}")
+    st.caption("Smart AI assistant for your documents")
+    st.divider()
+
+    with st.expander("📄 Upload PDFs", expanded=False):
+        uploaded_files = st.file_uploader(
+            "Choose PDF files",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="pdf_uploader"
+        )
+
+        if uploaded_files:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Upload", use_container_width=True):
+                    with st.spinner("Uploading files..."):
+                        upload_result = handle_pdf_upload(uploaded_files)
+                        if upload_result["success"]:
+                            st.success(f"✅ {upload_result['uploaded_count']} file(s) uploaded")
+                        else:
+                            st.error(upload_result["message"])
+                        if upload_result.get("errors"):
+                            for error in upload_result["errors"]:
+                                st.caption(f"❌ {error}")
+
+            with col2:
+                if st.button("Ingest", use_container_width=True):
+                    with st.spinner("Ingesting PDFs..."):
+                        ingest_result = run_full_ingestion()
+                        if ingest_result["success"]:
+                            stats = ingest_result["stats"]
+                            st.success("✅ Ingestion Complete!")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("PDFs", stats.get("pdf_docs", 0))
+                                st.metric("Chunks", stats.get("chunks_created", 0))
+                            with col_b:
+                                st.metric("Embedded", stats.get("chunks_embedded", 0))
+                                st.metric("Saved", stats.get("documents_saved", 0))
+                        else:
+                            st.error(ingest_result["message"])
+
+        status = get_ingestion_status()
+        st.caption(f"📊 PDFs available: {status.get('total_docs', 0)}")
+
     st.divider()
 
     if st.button("➕ New chat", use_container_width=True):
@@ -285,11 +309,8 @@ with st.sidebar:
 st.markdown(
     f"""
     <div class="app-header">
-        <div class="app-logo">✨</div>
-        <div>
-            <p class="app-title">{APP_NAME}</p>
-            <p class="app-subtitle">{APP_TAGLINE}</p>
-        </div>
+        <p class="app-title">{APP_NAME}</p>
+        <p class="app-subtitle">{APP_TAGLINE}</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -320,7 +341,7 @@ if not st.session_state.messages:
         """
         <div class="empty-state">
             <div class="icon">💬</div>
-            <div>Start the conversation — ask a question about your documents.</div>
+            <div>Ask your query...</div>
         </div>
         """,
         unsafe_allow_html=True,
