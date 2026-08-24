@@ -20,10 +20,10 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 # How many chunks to retrieve from ChromaDB
-RETRIEVAL_K = 20
+RETRIEVAL_K = 3
 
-# How many chunks to finally send to the LLM
-FINAL_K = 3
+# How many chunks to finally send to the LLM (increased from 3)
+FINAL_K = 2
 
 
 @lru_cache(maxsize=1)

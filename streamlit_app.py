@@ -4,8 +4,7 @@ import uuid
 import streamlit as st
 
 from config.Database import Base, engine
-from rag_handler.chat import answer_query
-from services.conversation_manager import get_conversation_manager
+from rag_handler.conversation_manager import get_conversation_manager
 from services.database_service import DatabaseService
 from services.logging_service import get_logger
 from services.ingestion_service import handle_pdf_upload, run_full_ingestion, get_ingestion_status

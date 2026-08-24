@@ -5,6 +5,9 @@ from models.messages import ChatMessage
 from models.documents import Document
 from config.Database import SessionLocal
 import uuid
+from services.logging_service import get_logger
+
+logger = get_logger(__name__)
 
 
 class DatabaseService:
@@ -145,6 +148,7 @@ class DatabaseService:
                 existing.landscape = landscape or existing.landscape
                 db.commit()
                 db.refresh(existing)
+                logger.debug(f"Updated document in database: {doc_id}")
                 return existing
 
             # Create new document
@@ -161,7 +165,12 @@ class DatabaseService:
             db.add(document)
             db.commit()
             db.refresh(document)
+            logger.info(f"✓ Document saved to database: {doc_id} (source: {source})")
             return document
+        except Exception as e:
+            logger.error(f"✗ Failed to save document {doc_id}: {type(e).__name__} — {e}")
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -177,25 +186,68 @@ class DatabaseService:
 
     @staticmethod
     def get_document_stats() -> dict:
-        """Get document statistics (total count, by module, etc.)"""
-        db: Session = SessionLocal()
+        """Get document statistics from ChromaDB (actual source of truth)"""
         try:
-            total = db.query(Document).count()
+            # Query ChromaDB directly for accurate count
+            import chromadb
+            from pathlib import Path
 
-            # Count by module
-            modules = db.query(Document.module, func.count(Document.module)).group_by(Document.module).all()
-            module_counts = {module: count for module, count in modules if module}
+            BASE_DIR = Path(__file__).resolve().parent.parent
+            CHROMA_DIR = BASE_DIR / "chroma_db"
 
-            # Total chunks
-            total_chunks = db.query(func.sum(Document.chunk_count)).scalar() or 0
+            if not CHROMA_DIR.exists():
+                return {
+                    "total_documents": 0,
+                    "by_module": {},
+                    "total_chunks": 0
+                }
+
+            client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+            collection = client.get_or_create_collection(name="pdf_documents")
+
+            # Get all metadata from ChromaDB
+            data = collection.get()
+
+            if not data or not data.get("metadatas"):
+                return {
+                    "total_documents": 0,
+                    "by_module": {},
+                    "total_chunks": 0
+                }
+
+            # Count unique documents and by module
+            unique_docs = set()
+            module_counts = {}
+
+            for metadata in data.get("metadatas", []):
+                doc_id = metadata.get("doc_id", "Unknown")
+                unique_docs.add(doc_id)
+
+                module = metadata.get("sap_module", "Unknown")
+                module_counts[module] = module_counts.get(module, 0) + 1
 
             return {
-                "total_documents": total,
+                "total_documents": len(unique_docs),
                 "by_module": module_counts,
-                "total_chunks": total_chunks
+                "total_chunks": len(data.get("ids", []))
             }
-        finally:
-            db.close()
+        except Exception as e:
+            logger.warning(f"Could not get ChromaDB stats: {e}")
+            # Fallback to database
+            db: Session = SessionLocal()
+            try:
+                total = db.query(Document).count()
+                modules = db.query(Document.module, func.count(Document.module)).group_by(Document.module).all()
+                module_counts = {module: count for module, count in modules if module}
+                total_chunks = db.query(func.sum(Document.chunk_count)).scalar() or 0
+
+                return {
+                    "total_documents": total,
+                    "by_module": module_counts,
+                    "total_chunks": total_chunks
+                }
+            finally:
+                db.close()
 
     @staticmethod
     def get_all_documents() -> list[Document]:

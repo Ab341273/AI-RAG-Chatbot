@@ -114,9 +114,12 @@ def run_full_ingestion() -> Dict[str, Any]:
                 "chunks_created": len(chunks),
                 "chunks_embedded": len(embedded_chunks),
                 "chunks_saved": save_result["chunks_saved"],
-                "documents_saved": save_result["documents_saved"]
+                "documents_saved": save_result["documents_saved"],
+                "documents_saved_to_db": save_result.get("documents_saved_to_db", 0),
+                "documents_failed_db": save_result.get("documents_failed_db", 0)
             },
-            "counters": counters
+            "counters": counters,
+            "save_details": save_result
         }
     except Exception as e:
         logger.error(f"Ingestion pipeline error: {e}", exc_info=True)

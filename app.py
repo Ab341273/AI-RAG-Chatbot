@@ -4,8 +4,7 @@ from typing import List
 from uuid import UUID
 from datetime import datetime
 
-from rag_handler.chat import answer_query
-from services.conversation_manager import get_conversation_manager
+from rag_handler.conversation_manager import get_conversation_manager
 from services.database_service import DatabaseService
 from services.logging_service import get_logger
 
@@ -47,7 +46,8 @@ class CreateSessionRequest(BaseModel):
 def chat(request: ChatRequest):
     logger.info(f"[API /chat] Query: {request.query[:100]} | K: {request.k}")
     try:
-        answer = answer_query(request.query, k=request.k)
+        conv_manager = get_conversation_manager()
+        answer = conv_manager.answer_query_with_context(request.query, k=request.k)
         logger.info(f"[API /chat] Success | Answer length: {len(answer)}")
         return ChatResponse(query=request.query, answer=answer)
     except Exception as e:

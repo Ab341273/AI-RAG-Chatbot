@@ -5,6 +5,7 @@ sentence-transformers
 chromadb
 langchain
 langchain-text-splitters
+langchain-openai
 python-dotenv
 httpx
 fastapi
@@ -13,6 +14,8 @@ streamlit
 sqlalchemy
 openmeteo-requests
 requests-cache
-retry-requests 
-numpy 
+retry-requests
+numpy
 pandas
+tabula-py
+openpyxl

@@ -10,6 +10,8 @@ import chromadb
 
 from services.logging_service import get_logger  # CHANGE 2: Import logger instead of using print()
 from services.database_service import DatabaseService  # Track documents in database
+from services.advanced_extraction import extract_text_with_tables, extract_tables_from_text
+from services.enhanced_metadata import extract_enhanced_metadata
 
 # CHANGE 3: Initialize logger for this module (will use existing logging_service)
 logger = get_logger(__name__)
@@ -280,25 +282,25 @@ def load_pdf_documents(pdf_folder: Path = PDF_FOLDER) -> Dict[str, Any]:
                     _move_to_quarantine(path, error_msg)
                     continue
 
-            # CHANGE 12: Step 3 - Try to open with PdfReader (catches corrupted/encrypted/truncated PDFs)
-            reader = PdfReader(path)
+            # CHANGE 12: Step 3 - Advanced extraction with table support (Marker)
+            extraction_result = extract_text_with_tables(path)
+            text = extraction_result["text"]
+            extraction_method = extraction_result["method"]
 
-            # CHANGE 13: Step 4 - Check for empty PDF (no pages at all)
-            if len(reader.pages) == 0:
-                logger.warning(f"{path.name}: no pages found")
-                text = ""
-            else:
-                # CHANGE 14: Extract text from all pages (or "" if page.extract_text() returns None)
-                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            # CHANGE 13: Extract tables if present
+            tables = []
+            if extraction_result.get("tables_preserved"):
+                tables = extract_tables_from_text(text)
+                logger.info(f"{path.name}: extracted {len(tables)} tables")
 
-            # CHANGE 15: Check if extracted text is empty/whitespace (warning, nahi error)
-            # Image-based PDFs valid documents hain, sirf text extract nahi ho raha
+            # CHANGE 14: Check if extracted text is empty/whitespace (warning, nahi error)
             if not text or text.isspace():
-                logger.warning(f"{path.name}: no extractable text (possibly scanned/image PDF)")
+                logger.warning(f"{path.name}: no extractable text (method: {extraction_method})")
 
-            # CHANGE 16: File successfully processed - append to docs aur counter increment karo
-            # PHASE 2: Extract SAP metadata from text (including module from filename)
-            sap_metadata = extract_sap_metadata(text, filename=path.name)
+            # CHANGE 15: File successfully processed - append to docs aur counter increment karo
+            # PHASE 2: Extract enhanced SAP metadata from text (table-aware)
+            sap_metadata = extract_enhanced_metadata(text, filename=path.name, tables=tables)
+            sap_metadata["extraction_method"] = extraction_method
 
             # PHASE 2: Use WRICEF_ID as primary doc_id (if available, else use filename)
             doc_id = sap_metadata.get("wricef_id", path.stem)
@@ -312,15 +314,15 @@ def load_pdf_documents(pdf_folder: Path = PDF_FOLDER) -> Dict[str, Any]:
                     "source": path.name,
                     "type": "pdf",
                     "content": text,
-                    # PHASE 2: Add SAP fields to document record
-                    "wricef_id": sap_metadata["wricef_id"],
-                    "sap_module": sap_metadata["sap_module"],
-                    "t_code_method": sap_metadata["t_code_method"],
-                    "project_code": sap_metadata["project_code"],
-                    "object_type": sap_metadata["object_type"],
-                    "badi_name": sap_metadata["badi_name"],
-                    "complexity": sap_metadata["complexity"],
-                    "landscape": sap_metadata["landscape"],
+                    # PHASE 2: Add SAP fields to document record (with defaults for missing fields)
+                    "wricef_id": sap_metadata.get("wricef_id", "Unknown"),
+                    "sap_module": sap_metadata.get("sap_module", "Unknown"),
+                    "t_code_method": sap_metadata.get("t_code_method", "Unknown"),
+                    "project_code": sap_metadata.get("project_code", "Unknown"),
+                    "object_type": sap_metadata.get("object_type", "Unknown"),
+                    "badi_name": sap_metadata.get("badi_name", "Unknown"),
+                    "complexity": sap_metadata.get("complexity", "Unknown"),
+                    "landscape": sap_metadata.get("landscape", "Unknown"),
                 }
             )
             counters["success"] += 1
@@ -512,17 +514,25 @@ def save_to_chroma(
         metadatas.append(metadata)
 
     try:
-        # FIX: Use upsert instead of add
-        # Kyon: upsert = update if exists, insert if new
-        # Agar dobara run karo to pehle wale chunks overwrite ho jayengi (duplicate error nahi hogi)
-        # agar add() use karte to DuplicateIDError aata agar IDs already exist karte
-        collection.upsert(
-            ids=[chunk["chunk_id"] for chunk in chunks],
-            metadatas=metadatas,
-            documents=[chunk["content"] for chunk in chunks],
-            embeddings=[chunk["embedding"] for chunk in chunks],
-        )
-        logger.info(f"Successfully saved {len(chunks)} chunks to Chroma collection '{collection_name}' (upserted)")
+        # FIX: Batch upsert to respect ChromaDB max batch size (5461)
+        # Kyon: ChromaDB has memory limits - ek saath sab insert nahi kar sakte
+        batch_size = 5000
+        total_saved = 0
+
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            batch_metadatas = metadatas[i:i + batch_size]
+
+            collection.upsert(
+                ids=[chunk["chunk_id"] for chunk in batch_chunks],
+                metadatas=batch_metadatas,
+                documents=[chunk["content"] for chunk in batch_chunks],
+                embeddings=[chunk["embedding"] for chunk in batch_chunks],
+            )
+            total_saved += len(batch_chunks)
+            logger.info(f"Batch saved: {total_saved}/{len(chunks)} chunks")
+
+        logger.info(f"Successfully saved all {len(chunks)} chunks to Chroma collection '{collection_name}' (batched upsert)")
     except Exception as e:
         logger.error(f"Failed to add chunks to Chroma: {type(e).__name__} — {e}")
         raise
@@ -553,10 +563,15 @@ def save_to_chroma(
                 }
             unique_sources[doc_id]["chunks"] += 1
 
-    # Save documents to database
+    # Save documents to database (with upsert logic for duplicates)
+    saved_to_db_count = 0
+    failed_db_saves = []
+
     for doc_id, info in unique_sources.items():
         try:
-            DatabaseService.add_document(
+            # Try to add document
+            # If duplicate exists, it will be handled by the service layer
+            result = DatabaseService.add_document(
                 doc_id=doc_id,
                 source=info["source"],
                 module=info["module"],
@@ -565,14 +580,25 @@ def save_to_chroma(
                 complexity=info["complexity"],
                 landscape=info["landscape"]
             )
-            logger.debug(f"Tracked document in database: {doc_id}")
+            saved_to_db_count += 1
         except Exception as e:
-            logger.warning(f"Could not track document {doc_id} in database: {e}")
+            # Log database save failures explicitly
+            error_msg = f"{type(e).__name__}: {e}"
+            logger.error(f"✗ Failed to save document {doc_id} to database — {error_msg}")
+            failed_db_saves.append({"doc_id": doc_id, "error": error_msg})
+
+    if failed_db_saves:
+        logger.warning(f"⚠ {len(failed_db_saves)} documents failed to save to database (but were saved to ChromaDB)")
+        for failure in failed_db_saves:
+            logger.warning(f"  - {failure['doc_id']}: {failure['error']}")
 
     return {
         "chunks_saved": len(chunks),
-        "documents_saved": len(saved_doc_ids),
-        "saved_doc_ids": sorted(list(saved_doc_ids)),
+        "documents_saved": len(unique_sources),
+        "documents_saved_to_db": saved_to_db_count,
+        "documents_failed_db": len(failed_db_saves),
+        "failed_db_saves": failed_db_saves,
+        "saved_doc_ids": sorted(list(unique_sources.keys())),
         "collection_name": collection_name,
         "persist_dir": str(persist_dir),
     }
@@ -663,10 +689,15 @@ def _print_summary(
 
     # Chroma save phase (Phase 2)
     if save_stats:
-        logger.info("Phase 3: Chroma Vector Store")
+        logger.info("Phase 3: Vector Store & Database")
         logger.info("-" * 70)
-        logger.info(f"  Chunks saved: {save_stats['chunks_saved']}")
-        logger.info(f"  Documents saved: {save_stats['documents_saved']}")
+        logger.info(f"  Chunks saved to Chroma: {save_stats['chunks_saved']}")
+        logger.info(f"  Documents saved to Chroma: {save_stats['documents_saved']}")
+        logger.info(f"  Documents saved to PostgreSQL: {save_stats.get('documents_saved_to_db', 'N/A')}")
+        if save_stats.get('documents_failed_db', 0) > 0:
+            logger.warning(f"  ⚠ Documents failed to save to PostgreSQL: {save_stats['documents_failed_db']}")
+            for failure in save_stats.get('failed_db_saves', []):
+                logger.warning(f"    - {failure['doc_id']}: {failure['error']}")
         logger.info(f"  Document IDs: {save_stats['saved_doc_ids']}")
         logger.info(f"  Collection: {save_stats['collection_name']}")
         logger.info(f"  Location: {save_stats['persist_dir']}")
