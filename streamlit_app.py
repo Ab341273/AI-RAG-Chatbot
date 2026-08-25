@@ -8,6 +8,8 @@ from rag_handler.conversation_manager import get_conversation_manager
 from services.database_service import DatabaseService
 from services.logging_service import get_logger
 from services.ingestion_service import handle_pdf_upload, run_full_ingestion, get_ingestion_status
+from security.input_guard import InputGuard
+from security.constants import GREETING_RESPONSES
 
 Base.metadata.create_all(bind=engine)
 
@@ -367,18 +369,40 @@ else:
 prompt = st.chat_input("Type your message...")
 
 if prompt:
+    # ========== SECURITY: Input Validation ==========
+    is_valid, response_msg, security_level = InputGuard.validate(prompt)
+
+    if not is_valid:
+        # Show security rejection message (only for actual threats)
+        st.markdown(render_bubble("bot", response_msg), unsafe_allow_html=True)
+        st.session_state.messages.append({"role": "assistant", "content": response_msg})
+        logger.warning(f"[SECURITY] Blocked query: {security_level.value}")
+        st.stop()
+
+    # Create session if needed
     if st.session_state.session_id is None:
         session_title = prompt[:50] if len(prompt) > 0 else "New Chat"
         new_session = DatabaseService.create_session(title=session_title)
         st.session_state.session_id = new_session.id
         logger.info(f"[STREAMLIT] New session created: {st.session_state.session_id} | Title: {session_title}")
 
+    # Handle greetings
+    if security_level.name == "GREETING":
+        greeting_type = response_msg.split(":")[1]
+        greeting_response = GREETING_RESPONSES.get(greeting_type, GREETING_RESPONSES["default"])
+        st.markdown(render_bubble("bot", greeting_response), unsafe_allow_html=True)
+        st.session_state.messages.append({"role": "assistant", "content": greeting_response})
+        st.stop()
+
+    # All other queries go to RAG (retriever decides relevance)
+
     logger.info(f"[STREAMLIT] User message: {prompt[:100]} | Session: {st.session_state.session_id}")
 
-    DatabaseService.add_message(st.session_state.session_id, "user", prompt)
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Show user message
     st.markdown(render_bubble("user", prompt), unsafe_allow_html=True)
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
+    # Show typing indicator
     typing_placeholder = st.empty()
     typing_placeholder.markdown(
         """

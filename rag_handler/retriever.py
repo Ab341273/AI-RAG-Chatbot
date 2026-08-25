@@ -19,11 +19,12 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
+# [OPTIMIZATION] Retrieval parameters tuned for speed
 # How many chunks to retrieve from ChromaDB
-RETRIEVAL_K = 3
+RETRIEVAL_K = 8  # Previously 3 - balance between coverage and speed
 
-# How many chunks to finally send to the LLM (increased from 3)
-FINAL_K = 2
+# How many chunks to finally send to the LLM
+FINAL_K = 3  # Previously 2 - better coverage without much overhead
 
 
 @lru_cache(maxsize=1)
@@ -152,25 +153,23 @@ def retrieve_similar_chunks(
 
     logger.info(f"[RETRIEVAL] Retrieved {len(candidates)} candidates from ChromaDB")
 
-    reranker = create_reranker()
+    # [OPTIMIZATION TEST] Reranker DISABLED temporarily
+    # Comment back in if you want reranking
+    # This helps identify if reranker is the bottleneck (33s issue)
 
-    pairs = [
-        [query, candidate["document"]]
-        for candidate in candidates
-    ]
+    # reranker = create_reranker()
+    # pairs = [
+    #     [query, candidate["document"]]
+    #     for candidate in candidates
+    # ]
+    # scores = reranker.predict(pairs)
+    # for candidate, score in zip(candidates, scores):
+    #     candidate["rerank_score"] = float(score)
+    # candidates.sort(key=lambda x: x["rerank_score"], reverse=True)
 
-    scores = reranker.predict(pairs)
-
-    for candidate, score in zip(
-        candidates,
-        scores
-    ):
-        candidate["rerank_score"] = float(score)
-
-    candidates.sort(
-        key=lambda x: x["rerank_score"],
-        reverse=True
-    )
+    # [OPTIMIZATION] Without reranker: use ChromaDB distance as score
+    for candidate in candidates:
+        candidate["rerank_score"] = 1.0 - candidate["distance"]  # Convert distance to similarity
 
     final_results = candidates[:final_k]
 
